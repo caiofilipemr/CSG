@@ -1,23 +1,64 @@
 #include <GL/glut.h>
 
-#define ROTATION_SENSIBILITY 5.0
-
 GLfloat xRotation;
 GLfloat yRotation;
+GLfloat zRotation;
 GLfloat lightPosition[] = {-25.f, 0.f, 50.f, 1.f};
-int initialX;
-int initialY;
-int pressedButton;
 
 void clearBuffers() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 }
 
-void drawCube() {
-    glPushMatrix();
-    glTranslatef(-10, 0, 0);
+void setViewAngle() {
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
     glRotatef(xRotation, 1, 0, 0);
     glRotatef(yRotation, 0, 1, 0);
+    glRotatef(zRotation, 0, 0, 1);
+}
+
+void firstInsideSecond(void(*drawFirstObject)(void), void(*drawSecondObject)(void), GLenum face, GLenum test)
+{
+    glEnable(GL_DEPTH_TEST);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glCullFace(face); /* controls which face of a to use*/
+    drawFirstObject(); /* draw a face of a into depth buffer */
+
+    /* use stencil plane to find parts of a in b */
+    glDepthMask(GL_FALSE);
+    glEnable(GL_STENCIL_TEST);
+    glStencilFunc(GL_ALWAYS, 0, 0);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
+    glCullFace(GL_BACK);
+    drawSecondObject(); /* increment the stencil where the front face of b is drawn */
+    glStencilOp(GL_KEEP, GL_KEEP, GL_DECR);
+    glCullFace(GL_FRONT);
+    drawSecondObject(); /* decrement the stencil buffer where the back face of b is drawn */
+    glDepthMask(GL_TRUE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+    glStencilFunc(test, 0, 1);
+    glDisable(GL_DEPTH_TEST);
+
+    glCullFace(face);
+    drawFirstObject(); /* draw the part of a that's in b */
+    glDisable(GL_STENCIL_TEST);
+}
+
+void fixDepth(void(*drawObject)(void))
+{
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_ALWAYS);
+    drawObject();
+    glDepthFunc(GL_LESS);
+    glDisable(GL_DEPTH_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+}
+
+void drawCube() {
+    glPushMatrix();
+    glTranslatef(0, 0, 0);
     glColor3f(1.0, 0.0, 0.0);
     glutSolidCube(5);
     glPopMatrix();
@@ -25,9 +66,7 @@ void drawCube() {
 
 void drawSphere() {
     glPushMatrix();
-    glTranslatef(0, 0, 0);
-    glRotatef(xRotation, 1, 0, 0);
-    glRotatef(yRotation, 0, 1, 0);
+    glTranslatef(2.5f, 2.5, 2.5);
     glColor3f(0.0, 1.0, 0.0);
     glutSolidSphere(2.5, 40, 40);
     glPopMatrix();
@@ -35,19 +74,36 @@ void drawSphere() {
 
 void drawCone() {
     glPushMatrix();
-    glTranslatef(10, 0, 0);
-    glRotatef(xRotation, 1, 0, 0);
-    glRotatef(yRotation, 0, 1, 0);
+    glRotatef(270, 1, 0, 0);
+    glTranslatef(0, 0, -3);
     glColor3f(0.0, 0.0, 1.0);
-    glutSolidCone(2.5, 2.5, 40, 40);
+    glutSolidCone(2.5, 8, 40, 40);
     glPopMatrix();
+}
+
+void _union(void(*drawFirstObject)(void), void(*drawSecondObject)(void)) {
+    glEnable(GL_DEPTH_TEST);
+    drawFirstObject();
+    drawSecondObject();
+    glDisable(GL_DEPTH_TEST);
+}
+
+void intersection(void(*drawFirstObject)(void), void(*drawSecondObject)(void)) {
+    firstInsideSecond(drawFirstObject, drawSecondObject, GL_BACK, GL_NOTEQUAL);
+    fixDepth(drawSecondObject);
+    firstInsideSecond(drawSecondObject, drawFirstObject, GL_BACK, GL_NOTEQUAL);
+}
+
+void subtraction(void(*drawFirstObject)(void), void(*drawSecondObject)(void)) {
+    firstInsideSecond(drawFirstObject, drawSecondObject, GL_FRONT, GL_NOTEQUAL);
+    fixDepth(drawSecondObject);
+    firstInsideSecond(drawSecondObject, drawFirstObject, GL_BACK, GL_EQUAL);
 }
 
 void draw() {
     clearBuffers();
-    drawCube();
-    drawSphere();
-    drawCone();
+    setViewAngle();
+    _union(drawCube, drawCone);
     glutSwapBuffers();
 }
 
@@ -58,24 +114,41 @@ void definePerspective() {
 }
 
 void mouseClick(int button, int state, int x, int y) {
-    if (state == GLUT_DOWN) {
-        initialX = x;
-        initialY = y;
-        pressedButton = button;
-    } else {
-        pressedButton = -1;
-    }
 }
 
 void mouseMove(int x, int y) {
-    if (pressedButton == GLUT_LEFT_BUTTON) {
-        int deltaX = initialX - x;
-        int deltaY = initialY - y;
-        xRotation = xRotation - deltaY / ROTATION_SENSIBILITY;
-        yRotation = yRotation - deltaX / ROTATION_SENSIBILITY;
+}
 
-        initialX = x;
-        initialY = y;
+void keyboardKeys(unsigned char key, int, int) {
+    switch (key) {
+        case ',':
+            zRotation += 1;
+            break;
+        case '.':
+            zRotation -= 1;
+            break;
+        default:
+            break;
+    }
+    glutPostRedisplay();
+}
+
+void keyboardSpecialKeys(int key, int, int) {
+    switch (key) {
+        case GLUT_KEY_LEFT:
+            yRotation -= 1;
+            break;
+        case GLUT_KEY_RIGHT:
+            yRotation += 1;
+            break;
+        case GLUT_KEY_UP:
+            xRotation -= 1;
+            break;
+        case GLUT_KEY_DOWN:
+            xRotation += 1;
+            break;
+        default:
+            break;
     }
     glutPostRedisplay();
 }
@@ -84,6 +157,8 @@ void defineCallbacks() {
     glutDisplayFunc(draw);
     glutMouseFunc(mouseClick);
     glutMotionFunc(mouseMove);
+    glutKeyboardFunc(keyboardKeys);
+    glutSpecialFunc(keyboardSpecialKeys);
 }
 
 void defineWindowConfiguration() {
@@ -111,7 +186,7 @@ void init() {
     glutMainLoop();
 }
 
-int main (int argc, char **argv) {
+int main(int argc, char **argv) {
     glutInit(&argc, argv);
     init();
     return 0;
